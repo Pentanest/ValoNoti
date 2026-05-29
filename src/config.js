@@ -5,8 +5,8 @@ const { resolve } = require("path");
 function loadEnv() {
   const envPath = resolve(__dirname, "..", ".env");
   if (!existsSync(envPath)) {
-    console.error("❌  .env file not found. Copy .env.example → .env and fill in your values.");
-    process.exit(1);
+    // No .env file — that's fine on Railway / Render where env vars are injected
+    return;
   }
   const lines = readFileSync(envPath, "utf-8").split("\n");
   for (const line of lines) {
