@@ -1,15 +1,17 @@
 {
-  "name": "valorant-update-bot",
+  "name": "valonoti",
   "version": "1.0.0",
-  "description": "Discord bot that pushes Valorant game updates to channels",
-  "main": "src/bot.js",
+  "description": "ValoNoti - Valorant Notifications",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/bot.js",
-    "dev": "node --watch src/bot.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "discord.js": "^14.16.3",
-    "rss-parser": "^3.13.0",
-    "node-cron": "^3.0.3"
+    "express": "^4.18.2"
   }
 }
+
