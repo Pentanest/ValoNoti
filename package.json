@@ -1,0 +1,15 @@
+{
+  "name": "valorant-update-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that pushes Valorant game updates to channels",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "rss-parser": "^3.13.0",
+    "node-cron": "^3.0.3"
+  }
+}
