@@ -63,6 +63,63 @@ function buildEmbed(update) {
   return embed;
 }
 
+// ─── Server-status embed builder (rich, descriptive) ─────────────────────────
+
+const SEVERITY_COLOR = {
+  critical: 0xff4444,
+  warning: 0xffa500,
+  info: 0x00b0ff,
+};
+
+function pickLocale(arr) {
+  if (!Array.isArray(arr)) return "";
+  const en = arr.find((t) => t.locale === "en_US") || arr[0];
+  return en?.content || "";
+}
+
+function buildStatusEmbed(inc) {
+  const title = pickLocale(inc.titles) || "Server Notice";
+  const isMaintenance = !!inc.maintenance_status;
+  const severity = (inc.incident_severity || "").toLowerCase();
+
+  // Latest update text is the most descriptive part Riot gives us
+  const latest = inc.updates?.[0];
+  const body = pickLocale(latest?.translations) || "No further details provided by Riot.";
+
+  const emoji = isMaintenance ? "🔧" : severity === "critical" ? "🚨" : "⚠️";
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${emoji}  ${title}`)
+    .setURL("https://status.riotgames.com/valorant?region=ap&locale=en_US")
+    .setColor(
+      isMaintenance ? 0xffa500 : SEVERITY_COLOR[severity] || 0xff4444
+    )
+    .setDescription(body.length > 600 ? body.slice(0, 597) + "…" : body);
+
+  const fields = [];
+  fields.push({
+    name: "Type",
+    value: isMaintenance
+      ? `Maintenance (${inc.maintenance_status})`
+      : `Incident${severity ? ` (${severity})` : ""}`,
+    inline: true,
+  });
+  if (Array.isArray(inc.platforms) && inc.platforms.length) {
+    fields.push({
+      name: "Affected platforms",
+      value: inc.platforms.join(", "),
+      inline: true,
+    });
+  }
+  embed.addFields(fields);
+
+  const ts = latest?.updated_at || latest?.created_at || inc.updated_at;
+  if (ts) embed.setTimestamp(new Date(ts));
+  embed.setFooter({ text: "Riot Status • Valorant (AP)" });
+
+  return embed;
+}
+
 // ─── Post updates to all configured channels ────────────────────────────────
 
 async function postUpdate(update) {
@@ -188,15 +245,7 @@ client.on("interactionCreate", async (interaction) => {
           .setTimestamp();
         await interaction.editReply({ embeds: [embed] });
       } else {
-        const embeds = issues.slice(0, 5).map((inc) => {
-          const title =
-            inc.titles?.find((t) => t.locale === "en_US")?.content ||
-            "Server Issue";
-          return new EmbedBuilder()
-            .setTitle(`⚠️  ${title}`)
-            .setColor(inc.maintenance_status ? 0xffa500 : 0xff4444)
-            .setTimestamp();
-        });
+        const embeds = issues.slice(0, 5).map(buildStatusEmbed);
         await interaction.editReply({ embeds });
       }
     } catch {
