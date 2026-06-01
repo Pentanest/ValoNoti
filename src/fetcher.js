@@ -87,9 +87,22 @@ async function fetchServerStatus() {
       const translations = latestUpdate?.translations || [];
       const en = translations.find((t) => t.locale === "en_US") || translations[0] || {};
 
+      // Key by incident *and* its latest update, so each new update Riot posts
+      // to an ongoing incident/maintenance re-posts (scheduled → in_progress →
+      // resolved) instead of being silently deduped against the first message.
+      const updateKey =
+        latestUpdate?.id || latestUpdate?.created_at || "init";
+      const baseTitle =
+        inc.titles?.find((t) => t.locale === "en_US")?.content ||
+        `Server ${inc.incident_severity || "notice"}`;
+      // Surface the current maintenance phase in the title for follow-up posts.
+      const title = inc.maintenance_status
+        ? `${baseTitle} — ${inc.maintenance_status}`
+        : baseTitle;
+
       return {
-        id: `status-${inc.id}`,
-        title: inc.titles?.find((t) => t.locale === "en_US")?.content || `Server ${inc.incident_severity || "notice"}`,
+        id: `status-${inc.id}-${updateKey}`,
+        title,
         url: "https://status.riotgames.com/valorant?region=ap&locale=en_US",
         description: en.content || "Check Valorant server status for details.",
         date: latestUpdate?.created_at
