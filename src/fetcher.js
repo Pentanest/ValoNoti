@@ -1,66 +1,150 @@
-const RSSParser = require("rss-parser");
-
-const parser = new RSSParser({
-  timeout: 15_000,
-  headers: {
-    "User-Agent": "ValorantUpdateBot/1.0",
-  },
-});
+const UA = "ValorantUpdateBot/1.0";
 
 // ─── Sources ────────────────────────────────────────────────────────────────
 
 /**
- * Source 1: Valorant official news via playvalorant.com content API
- * Returns patch notes, game updates, esports news, dev diaries, etc.
+ * Source 1 (primary, reliable): Valorant client build version.
+ *
+ * valorant-api.com/v1/version is a public, no-auth, stable endpoint that
+ * reflects the live game client build. When `data.version` changes, Riot
+ * shipped a new build — this fires the instant a patch drops, even before any
+ * news article exists. Keyed by version so the DB posts it exactly once per
+ * build. This is HTML-independent and keeps working even if the site redesigns.
  */
-async function fetchFromContentAPI() {
-  const url =
-    "https://playvalorant.com/page-data/en-us/news/game-updates/page-data.json";
-  const res = await fetch(url, {
-    headers: { "User-Agent": "ValorantUpdateBot/1.0" },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) throw new Error(`Content API returned ${res.status}`);
-  const json = await res.json();
+async function fetchGameVersion() {
+  try {
+    const res = await fetch("https://valorant-api.com/v1/version", {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`version API returned ${res.status}`);
+    const json = await res.json();
+    const data = json?.data;
+    if (!data?.version) return [];
 
-  // Navigate Gatsby page-data structure
-  const articles =
-    json?.result?.data?.allContentstackArticles?.nodes ?? [];
+    // "12.11.00.4738152" → "12.11" → patch-notes slug "valorant-patch-notes-12-11"
+    const [major, minor] = data.version.split(".");
+    const shortVer = `${major}.${minor}`;
+    const patchNotesUrl = `https://playvalorant.com/en-us/news/game-updates/valorant-patch-notes-${major}-${minor}/`;
+    const builtOn = data.buildDate
+      ? new Date(data.buildDate).toISOString().slice(0, 10)
+      : "recently";
 
-  return articles.map((a) => ({
-    id: `valnews-${a.id || a.url?.url || a.title}`,
-    title: a.title,
-    url: a.url?.url
-      ? `https://playvalorant.com${a.url.url}`
-      : `https://playvalorant.com/en-us/news/game-updates/`,
-    description: a.description || a.external_link || "",
-    date: a.date ? new Date(a.date) : new Date(),
-    category: a.category?.[0]?.title || "Game Update",
-    image: a.banner?.url || null,
-    source: "playvalorant.com",
-  }));
+    return [
+      {
+        id: `valver-${data.version}`,
+        title: `🆕 New Valorant Build — Patch ${shortVer}`,
+        url: patchNotesUrl,
+        description: `Riot shipped a new Valorant client build (v${data.version}), built ${builtOn}. Patch notes & full details below.`,
+        date: data.buildDate ? new Date(data.buildDate) : new Date(),
+        category: "Game Update",
+        image: null,
+        source: "Riot Client",
+      },
+    ];
+  } catch (err) {
+    console.warn("⚠️  Version source failed:", err.message);
+    return [];
+  }
+}
+
+// Map a playvalorant URL category segment to one of our embed categories.
+function categoryFromPath(segment, slug) {
+  switch (segment) {
+    case "game-updates":
+      return slug.includes("patch-notes") ? "Patch Notes" : "Game Update";
+    case "dev":
+      return "Dev Diary";
+    case "esports":
+      return "Esports";
+    case "announcements":
+      return "Announcement";
+    case "community":
+      return "Community";
+    default:
+      return "Riot News";
+  }
+}
+
+function matchMeta(html, property) {
+  // Tolerate attribute ordering: property may come before or after content.
+  const re = new RegExp(
+    `<meta[^>]+property=["']${property}["'][^>]*content=["']([^"']*)["']`,
+    "i"
+  );
+  const m = html.match(re);
+  return m ? m[1] : "";
 }
 
 /**
- * Source 2: Riot Games official news RSS (covers all Riot titles, we filter)
+ * Source 2: Valorant news via playvalorant.com (no-auth HTML scrape).
+ *
+ * The listing page is server-side rendered with plain <a href> links; each
+ * article exposes og:title / og:description / og:image and a <time dateTime>.
+ * FRAGILITY: this depends on the current site markup — if Riot redesigns,
+ * news may break, but fetchGameVersion() still catches client patches.
  */
-async function fetchFromRiotRSS() {
+async function fetchValorantNews() {
   try {
-    const feed = await parser.parseURL(
-      "https://www.riotgames.com/en/news?tags=valorant/rss.xml"
+    const res = await fetch("https://playvalorant.com/en-us/news/", {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`news listing returned ${res.status}`);
+    const html = await res.text();
+
+    // Extract unique article paths (listing is newest-first). Exclude the
+    // category index pages themselves (those have no second path segment).
+    const re = /\/en-us\/news\/([a-z0-9-]+)\/([a-z0-9-]+)\/?/gi;
+    const seen = new Set();
+    const candidates = [];
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const [, segment, slug] = m;
+      const key = `${segment}/${slug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push({ segment, slug });
+      if (candidates.length >= 12) break; // newest 12
+    }
+
+    const articles = await Promise.all(
+      candidates.map(async ({ segment, slug }) => {
+        try {
+          const url = `https://playvalorant.com/en-us/news/${segment}/${slug}/`;
+          const r = await fetch(url, {
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!r.ok) return null;
+          const page = await r.text();
+
+          const title = matchMeta(page, "og:title") || slug.replace(/-/g, " ");
+          const description = matchMeta(page, "og:description");
+          const image = matchMeta(page, "og:image") || null;
+          const timeMatch = page.match(/<time[^>]+dateTime=["']([^"']+)["']/i);
+          const date = timeMatch ? new Date(timeMatch[1]) : new Date();
+
+          return {
+            id: `valnews-${slug}`,
+            title,
+            url,
+            description,
+            date,
+            category: categoryFromPath(segment, slug),
+            image,
+            source: "playvalorant.com",
+          };
+        } catch {
+          return null; // skip just this article
+        }
+      })
     );
-    return (feed.items || []).map((item) => ({
-      id: `riot-${item.guid || item.link}`,
-      title: item.title,
-      url: item.link,
-      description: item.contentSnippet || item.content || "",
-      date: item.pubDate ? new Date(item.pubDate) : new Date(),
-      category: "Riot News",
-      image: item.enclosure?.url || null,
-      source: "riotgames.com",
-    }));
-  } catch {
-    return []; // non-critical, silently skip
+
+    return articles.filter(Boolean);
+  } catch (err) {
+    console.warn("⚠️  News source failed:", err.message);
+    return [];
   }
 }
 
@@ -125,8 +209,8 @@ async function fetchServerStatus() {
  */
 async function fetchAllUpdates() {
   const results = await Promise.allSettled([
-    fetchFromContentAPI(),
-    fetchFromRiotRSS(),
+    fetchGameVersion(),
+    fetchValorantNews(),
     fetchServerStatus(),
   ]);
 

@@ -28,6 +28,8 @@ const CATEGORY_EMOJI = {
   "Riot News": "📰",
   "Dev Diary": "🗒️",
   Esports: "🏆",
+  Announcement: "📣",
+  Community: "🤝",
 };
 
 function buildEmbed(update) {
@@ -151,6 +153,18 @@ async function checkForUpdates() {
   try {
     console.log("🔍  Checking for Valorant updates…");
     const updates = await fetchAllUpdates();
+
+    // First run on a fresh deploy: record everything currently live WITHOUT
+    // posting, so we don't flood the channel with a dozen back-dated items.
+    // Only genuinely new updates get posted from here on. (`/val-latest` shows
+    // the current patch on demand.)
+    if (db.isFirstRun()) {
+      db.seed(updates);
+      console.log(
+        `🌱  First run — seeded ${updates.length} existing item(s). Will post only new updates from now on.`
+      );
+      return;
+    }
 
     let newCount = 0;
     // Process oldest-first so channel messages appear chronologically

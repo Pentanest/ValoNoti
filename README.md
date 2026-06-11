@@ -7,8 +7,9 @@ A Discord bot that automatically monitors and posts **Valorant game updates** �
 ## Features
 
 - **Auto-posting** — checks for new updates every N minutes and pushes rich embeds to your channels
-- **Multiple sources** — pulls from playvalorant.com content API, Riot Games RSS, and Valorant server status API
-- **Deduplication** — SQLite database tracks what's already been posted, so no double-posts even after restarts
+- **Reliable patch detection** — watches the Valorant client build version (`valorant-api.com/v1/version`), so a new game build is caught the instant it ships, even before any news article exists
+- **Multiple sources** — client build version (patch detection) + playvalorant.com news scrape (patch notes, announcements, dev, esports, community) + Valorant server status API
+- **Deduplication** — a JSON database tracks what's already been posted, so no double-posts even after restarts (and a fresh deploy seeds silently instead of flooding the channel)
 - **Slash commands** — `/val-check` (force check), `/val-latest` (show newest update), `/val-status` (server health)
 - **Multi-channel** — post to one or multiple channels simultaneously
 - **Categorized embeds** — color-coded by type (patch notes, incidents, maintenance)
@@ -144,6 +145,8 @@ valorant-discord-bot/
 - BR (Brazil): `.../status/br.json`
 
 **Add more sources** — add a new async function in `fetcher.js` returning the same `{ id, title, url, description, date, category, image, source }` shape, then add it to the `Promise.allSettled` array in `fetchAllUpdates()`.
+
+**Note on news scraping** — `fetchValorantNews()` scrapes playvalorant.com's news pages (no official JSON API exists). If Riot redesigns the site, news posts may stop and the scrape may need updating. Patch detection does **not** rely on this — `fetchGameVersion()` watches the client build version directly, so new game builds are always caught regardless of the website's markup.
 
 ---
 

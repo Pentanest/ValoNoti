@@ -34,6 +34,21 @@ module.exports = {
     save(data);
   },
 
+  /** True when nothing has ever been posted (fresh deploy) */
+  isFirstRun() {
+    return Object.keys(load()).length === 0;
+  },
+
+  /** Mark a batch of updates as posted WITHOUT sending them (first-run seed) */
+  seed(updates) {
+    const data = load();
+    const now = Date.now();
+    for (const u of updates) {
+      data[u.id] = { title: u.title, url: u.url, postedAt: now };
+    }
+    save(data);
+  },
+
   /** Purge entries older than 90 days */
   cleanup() {
     const data = load();
